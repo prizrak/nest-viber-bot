@@ -6,6 +6,9 @@
 //
 
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import Vapor
 import JWT
 import struct ViberBotSwiftSDK.TextMessageRequestModel
@@ -58,12 +61,8 @@ extension ViberBot {
         guard let url = URL(string: Endpoint.sendMessage.urlPath) else {
             throw ViberBotError.endpointUrlIsNotValid
         }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        try request.applyJSONAsBody(internalModel)
-        let data = try await URLSession.shared.data(for: request)
-        let json = try JSONSerialization.jsonObject(with: data.0, options: [])
+        let result = try await data(from: url, for: internalModel)
+        let json = try JSONSerialization.jsonObject(with: result.data, options: [])
         print(json)
         return nil
     }
@@ -75,13 +74,30 @@ extension ViberBot {
         guard let url = URL(string: Endpoint.setWebhook(model: model).urlPath) else {
             throw ViberBotError.endpointUrlIsNotValid
         }
+
+        let result = try await data(from: url, for: model)
+        let json = try JSONSerialization.jsonObject(with: result.data, options: [])
+        print(json)
+        return nil
+    }
+    
+    private func data<T: Codable>(from url: URL, for model: T) async throws -> (data: Data, response: URLResponse) {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         try request.applyJSONAsBody(model)
-        let data = try await URLSession.shared.data(for: request)
-        let json = try JSONSerialization.jsonObject(with: data.0, options: [])
-        print(json)
-        return nil
+#if canImport(FoundationNetworking)
+        let result = await withCheckedContinuation { continuation in
+            URLSession.shared.dataTask(with: request) { data, response, _ in
+                guard let data = data, let response = response else {
+                    fatalError()
+                }
+                continuation.resume(returning: (data, response))
+            }.resume()
+        }
+#else
+        let result = try await URLSession.shared.data(for: request)
+#endif
+        return (data: result.0, response: result.1)
     }
 }
 
